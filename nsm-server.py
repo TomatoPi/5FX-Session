@@ -20,7 +20,7 @@ class Context :
     self.commands = commands
     self.isRunning = True
     self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)])
-    self.url = 'osc.udp://raspberrypi:' + str(port)
+    self.url = 'osc.udp://localhost:' + str(port)
     self.address = liblo.Address(self.url)
 
     os.environ['NSM_URL'] = self.url

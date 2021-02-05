@@ -4,6 +4,8 @@ import subprocess as sp
 import os
 import time
 import liblo
+import random
+import argparse
 
 class Command :
   def __init__(self, help, call) :
@@ -11,9 +13,9 @@ class Command :
     self.call = call
 
 class Context :
-  def __init__(self, commands, port) :
+  def __init__(self, root, port, commands) :
 
-    self.sessionRoot = os.environ['HOME'] + "/sessions/"
+    self.sessionRoot = root
     if not os.path.exists(self.sessionRoot) :
       os.mkdir(self.sessionRoot)
 
@@ -25,7 +27,17 @@ class Context :
 
     os.environ['NSM_URL'] = self.url
 
-    self.server = liblo.ServerThread(port + 1, liblo.UDP)
+    success = False
+    for t in range(5) :
+      try :
+        self.server = liblo.ServerThread(port + random.randint(1, 10000), liblo.UDP)
+        success = True
+      except liblo.ServerError :
+        pass
+    if not success :
+      exit(-1)
+          
+
     self.server.add_method('/reply', None, nsm_reply_callback, self)
     self.server.start()
 
@@ -82,6 +94,17 @@ def cmd_duplicate(context) :
   context.nsm_duplicate(name)
 
 if __name__ == "__main__" :
+
+  parser = argparse.ArgumentParser(
+    description='New Session Manager server for 5FX Environment')
+  parser.add_argument('root', type=str, nargs='?', help='NSM Session root')
+  parser.add_argument('port', type=int, nargs='?', help='NSM Session port')
+  args = parser.parse_args()
+
+  if args.root is None :
+    args.root = os.environ['HOME'] + '/.5FX/5FX-Session/'
+  if args.port is None :
+    args.port = random.randint(10000, 32767)
   
   commands = {
     'help' : Command('display command list and help', cmd_help),
@@ -96,7 +119,7 @@ if __name__ == "__main__" :
     'quit' : Command('save current session', Context.nsm_quit),
     'list' : Command('save current session', Context.nsm_list),
     }
-  context = Context(commands, 10000)
+  context = Context(args.root, args.port, commands)
 
   while context.isRunning :
 

@@ -97,8 +97,9 @@ if __name__ == "__main__" :
 
   parser = argparse.ArgumentParser(
     description='New Session Manager server for 5FX Environment')
-  parser.add_argument('root', type=str, nargs='?', help='NSM Session root')
-  parser.add_argument('port', type=int, nargs='?', help='NSM Session port')
+  parser.add_argument('--root', type=str, nargs='?', help='NSM Session root')
+  parser.add_argument('--port', type=int, nargs='?', help='NSM Session port')
+  parser.add_argument('--session', type=str, nargs='?', help='NSM Session to load')
   args = parser.parse_args()
 
   if args.root is None :
@@ -120,6 +121,10 @@ if __name__ == "__main__" :
     'list' : Command('save current session', Context.nsm_list),
     }
   context = Context(args.root, args.port, commands)
+
+  if not args.session is None :
+    time.sleep(5)
+    context.nsm_open(args.session)
 
   while context.isRunning :
 

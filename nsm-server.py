@@ -100,6 +100,7 @@ if __name__ == "__main__" :
   parser.add_argument('--root', type=str, nargs='?', help='NSM Session root')
   parser.add_argument('--port', type=int, nargs='?', help='NSM Session port')
   parser.add_argument('--session', type=str, nargs='?', help='NSM Session to load')
+  parser.add_argument('--no-cli', action='store_true', help='Start without command line interface')
   args = parser.parse_args()
 
   if args.root is None :
@@ -128,11 +129,15 @@ if __name__ == "__main__" :
 
   while context.isRunning :
 
-    cmd = input("SessionFX << ")
+    if args.no_cli :
+      time.sleep(1)
 
-    if 0 < len(cmd) :
-      if cmd in commands :
-        commands[cmd].call(context)
+    else :
+      cmd = input("SessionFX << ")
+
+      if 0 < len(cmd) :
+        if cmd in commands :
+          commands[cmd].call(context)
 
   context.nsm_quit()
   context.server.stop()

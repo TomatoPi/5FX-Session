@@ -17,7 +17,7 @@ class Context :
 
     self.sessionRoot = root
     if not os.path.exists(self.sessionRoot) :
-      os.mkdir(self.sessionRoot)
+      os.makedirs(self.sessionRoot)
 
     self.commands = commands
     self.isRunning = True

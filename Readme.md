@@ -1,2 +1,3 @@
 # 5FX-Session
-New-Session-Manager CLI server
+
+Non-Session-Manager CLI server

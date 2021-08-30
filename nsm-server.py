@@ -25,6 +25,8 @@ class Context :
     self.url = 'osc.udp://localhost:' + str(port)
     self.address = liblo.Address(self.url)
 
+    self.session = None
+
     os.environ['NSM_URL'] = self.url
 
     success = False
@@ -48,19 +50,29 @@ class Context :
     self.server.send(self.address, '/nsm/server/save')
   def nsm_open(self, project) :
     self.server.send(self.address, '/nsm/server/open', ('s', project))
+    self.session = project
   def nsm_new(self, project) :
     self.server.send(self.address, '/nsm/server/new', ('s', project))
+    self.session = project
   def nsm_duplicate(self, project) :
     self.server.send(self.address, '/nsm/server/duplicate', ('s', project))
+    self.session = project
 
   def nsm_close(self) :
     self.server.send(self.address, '/nsm/server/close')
+    self.session = None
   def nsm_abort(self) :
     self.server.send(self.address, '/nsm/server/abort')
+    self.session = None
   def nsm_quit(self) :
     self.server.send(self.address, '/nsm/server/quit')
   def nsm_list(self) :
     self.server.send(self.address, '/nsm/server/list')
+  def reload(self) :
+    tmp = self.session
+    self.close()
+    time.sleep(5)
+    self.open(tmp)
 
 def nsm_reply_callback(path, args, types, address, context) :
   replypath = args[0]
@@ -92,6 +104,8 @@ def cmd_new(context) :
 def cmd_duplicate(context) :
   name = input("New Session << ")
   context.nsm_duplicate(name)
+def cmd_reload(context) :
+  context.reload()
 
 if __name__ == "__main__" :
 

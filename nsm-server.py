@@ -90,6 +90,10 @@ def cmd_quit(context) :
 def cmd_show(context) :
   print(f"""
   Context : Session = "{ context.currentSession }"
+  Clients :
+  {
+    sp.run(["cat", os.path.join(context.sessionRoot, context.currentSession, "session.nsm")], stdout = sp.PIPE) if context.currentSession is not None else ""
+  }
   """)
 
 if __name__ == "__main__" :

@@ -7,13 +7,47 @@ import liblo
 import random
 import argparse
 
-class Command :
-  def __init__(self, help, call) :
+class NSMCommand :
+  def __init__(self, help, *args, **kwargs) :
     self.help = help
-    self.call = call
+    self.args = args
+
+    self.quit = False
+    self.load = False
+
+    for key, value in kwargs.items() :
+      self.__dict__[key] = value
+
+  def call(self, cmd, context, **kwargs) :
+    msg = liblo.Message(f"/nsm/server/{cmd}")
+    for t, arg in self.args :
+
+      if arg in kwargs :
+        val = kwargs[arg]
+      else :
+        val = input(f"{arg} << ")
+
+      if self.load :
+        context.currentSession = val
+
+      msg.add((t, val))
+
+    context.server.send(context.address, msg)
+    if self.quit :
+      context.currentSession = ""
+
+class Command :
+  def __init__(self, help, routine) :
+    self.help = help
+    self.routine = routine
+
+  def call(self, cmd, context, **kwargs) :
+    self.routine(context)
 
 class Context :
   def __init__(self, root, port, commands) :
+
+    self.currentSession = ""
 
     self.sessionRoot = root
     if not os.path.exists(self.sessionRoot) :
@@ -24,8 +58,6 @@ class Context :
     self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)])
     self.url = 'osc.udp://localhost:' + str(port)
     self.address = liblo.Address(self.url)
-
-    self.session = None
 
     os.environ['NSM_URL'] = self.url
 
@@ -43,36 +75,15 @@ class Context :
     self.server.add_method('/reply', None, nsm_reply_callback, self)
     self.server.start()
 
-  def nsm_add(self, exec) :
-    self.server.send(self.address, '/nsm/server/add', ('s', exec))
-
-  def nsm_save(self) :
-    self.server.send(self.address, '/nsm/server/save')
-  def nsm_open(self, project) :
-    self.server.send(self.address, '/nsm/server/open', ('s', project))
-    self.session = project
-  def nsm_new(self, project) :
-    self.server.send(self.address, '/nsm/server/new', ('s', project))
-    self.session = project
-  def nsm_duplicate(self, project) :
-    self.server.send(self.address, '/nsm/server/duplicate', ('s', project))
-    self.session = project
-
-  def nsm_close(self) :
-    self.server.send(self.address, '/nsm/server/close')
-    self.session = None
-  def nsm_abort(self) :
-    self.server.send(self.address, '/nsm/server/abort')
-    self.session = None
-  def nsm_quit(self) :
-    self.server.send(self.address, '/nsm/server/quit')
-  def nsm_list(self) :
-    self.server.send(self.address, '/nsm/server/list')
+  def call(self, cmd, **kwargs) :
+    self.commands[cmd].call(cmd, self, **kwargs)
+    
   def reload(self) :
-    tmp = self.session
-    self.close()
+    tmp = self.currentSession
+    self.call('abort')
     time.sleep(5)
-    self.open(tmp)
+    self.call('open', project = tmp)
+
 
 def nsm_reply_callback(path, args, types, address, context) :
   replypath = args[0]
@@ -95,17 +106,22 @@ def cmd_add(context) :
   name = input("Program << ")
   context.nsm_add(name)
 
-def cmd_open(context) :
-  name = input("Session << ")
-  context.nsm_open(name)
-def cmd_new(context) :
-  name = input("New Session << ")
-  context.nsm_new(name)
-def cmd_duplicate(context) :
-  name = input("New Session << ")
-  context.nsm_duplicate(name)
 def cmd_reload(context) :
   context.reload()
+def cmd_show(context) :
+  if "" != context.currentSession :
+    print(f"""
+Context :
+  Session = "{ context.currentSession }"
+
+Clients :
+
+{
+sp.run(["cat", os.path.join(context.sessionRoot, context.currentSession, "session.nsm")], stdout = sp.PIPE).stdout.decode()
+}
+""")
+  else :
+    print("No Session oppend...")
 
 if __name__ == "__main__" :
 
@@ -125,15 +141,21 @@ if __name__ == "__main__" :
   commands = {
     'help' : Command('display command list and help', cmd_help),
     'exit' : Command('quit this program', cmd_quit),
-    'add' : Command('add a programm to the session', cmd_add),
-    'save' : Command('save current session', Context.nsm_save),
-    'open' : Command('open a session', cmd_open),
-    'new' : Command('create a new session', cmd_new),
-    'duplicate' : Command('duplicate current session', cmd_duplicate),
-    'close' : Command('save current session', Context.nsm_close),
-    'abort' : Command('save current session', Context.nsm_abort),
-    'quit' : Command('save current session', Context.nsm_quit),
-    'list' : Command('save current session', Context.nsm_list),
+
+    'show' : Command('Print current session', cmd_show),
+
+    'add' : NSMCommand('Adds a client to the current session.', ('s', "client")),
+    'save' : NSMCommand('Saves the current session.'),
+    'open' : NSMCommand('Saves the current session and loads a new session.', ('s', "project"), load=True),
+    'new' : NSMCommand('Saves the current session and creates a new session.', ('s', "project"), load=True),
+    'duplicate' : NSMCommand('Saves and closes the current session, makes a copy, and opens it.', ('s', "project"), load=True),
+    'reload' : Command('Abort session and reopen it', cmd_reload),
+
+    'close' : NSMCommand('Saves and closes the current session.', quit=True),
+    'abort' : NSMCommand('Closes the current session WITHOUT SAVING', quit=True),
+    'quit' : NSMCommand('Saves and closes the current session and terminates the server.', quit=True),
+
+    'list' : NSMCommand('Lists available projects. One /reply message will be sent for each existing project.'),
     }
   context = Context(args.root, args.port, commands)
 
@@ -151,7 +173,7 @@ if __name__ == "__main__" :
 
       if 0 < len(cmd) :
         if cmd in commands :
-          commands[cmd].call(context)
+          commands[cmd].call(cmd, context)
 
   context.nsm_quit()
   context.server.stop()

@@ -9,6 +9,7 @@ if __name__ == "__main__" :
   parser = argparse.ArgumentParser(description="Jackpatch utility reworked for finer usage")
   parser.add_argument('--save', action='store_true', help='dump current patchbay to stdout')
   parser.add_argument('--load', action='store_true', help='load a patchbay from stdin')
+  parser.add_argument('--clear', action='store_true', help='Clear all connections')
 
   args = parser.parse_args()
   
@@ -47,13 +48,15 @@ if __name__ == "__main__" :
       'ports' : list(ports_by_aliases.keys()),
       'graph' : [(aliases_by_ports[src], aliases_by_ports[dest]) for src, dest in connections]
     })
-
+  
   if args.load :
 
     blob = sys.stdin.readlines()
     
-    raw = eval("\n".join(blob))
+    raw = eval("\n".join(blob)) # Prevent clearing the graph if load failed
 
+  if args.clear :
+  
     old = sp.run(["jack_lsp", "-c"], stdout=sp.PIPE).stdout.decode().split('\n')
 
     current_port = None
@@ -68,6 +71,8 @@ if __name__ == "__main__" :
 
       else :
         current_port = line
+
+  if args.load :
 
     for src, dest in raw['graph'] :
       sp.run(['jack_connect', src, dest])

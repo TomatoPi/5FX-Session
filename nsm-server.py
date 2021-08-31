@@ -126,7 +126,7 @@ sp.run(["cat", os.path.join(context.sessionRoot, context.currentSession, "sessio
 if __name__ == "__main__" :
 
   parser = argparse.ArgumentParser(
-    description='New Session Manager server for 5FX Environment')
+    description='Non Session Manager server for 5FX Environment')
   parser.add_argument('--root', type=str, nargs='?', help='NSM Session root')
   parser.add_argument('--port', type=int, nargs='?', help='NSM Session port')
   parser.add_argument('--session', type=str, nargs='?', help='NSM Session to load')

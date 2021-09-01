@@ -28,13 +28,13 @@ MAKE_DEFAULTED(CurrentPatch, std::string, "default.pb");
 
 sfx::Logger logger;
 
-struct Config : public sfx::Config<CurrentPatch>
+struct Config : public sfx::Introspectable<CurrentPatch>
 {
   sfx::nsm::Config* session = nullptr;
 
   std::filesystem::path session_path() const
   {
-    return session->get<sfx::nsm::InstancePath>().value();
+    return session->get<sfx::nsm::InstancePath>().get();
   }
   std::filesystem::path patchbays_path() const
   {
@@ -42,7 +42,7 @@ struct Config : public sfx::Config<CurrentPatch>
   }
   std::filesystem::path patch_path() const
   {
-    return patchbays_path() / get<CurrentPatch>().value();
+    return patchbays_path() / get<CurrentPatch>().get();
   }
   std::filesystem::path config_path() const
   {
@@ -53,7 +53,7 @@ struct Config : public sfx::Config<CurrentPatch>
   {
     sfx::FileGuard config_file{ config_path(), *this };
     sfx::sofstream stream{ config_file };
-    stream.stream() << *this;
+    stream.get() << *this;
     logger << "Save Global Config" << std::endl;
   }
 };

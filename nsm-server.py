@@ -80,8 +80,8 @@ class Context :
     self.commands = commands
     self.isRunning = True
     self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)], env=os.environ)
-
     self.sfx_server.server.add_method('/sfx/new/client', None, sfx_new_client_callback, self)
+
     self.sfx_server.server.add_method('/sfx/new/method', None, sfx_new_method_callback, self)
     self.sfx_server.server.start()
     

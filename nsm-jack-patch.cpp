@@ -133,25 +133,25 @@ int main(int argc, char const* argv[], char const* env[])
     logger << "Config : " << nsm_session->config << std::endl;
     has_nsm = true;
     
-    nsm_session->add_method("/patcher/new", "s",
+    nsm_session->add_method("/patcher/new", "s", "patchbay", 
       [](lo_arg** argv, int) -> void
       {
         switch_patch(&argv[0]->s);
         logger << "New : " << &argv[0]->s << std::endl;
       });
-    nsm_session->add_method("/patcher/save", "",
+    nsm_session->add_method("/patcher/save", "", "", 
       [](lo_arg** argv, int) -> void
       {
         details::save_patch(global_config.patch_path());
         logger << "Save to : " << global_config.patch_path() << std::endl;
       });
-    nsm_session->add_method("/patcher/load", "s",
+    nsm_session->add_method("/patcher/load", "s", "patchbay", 
       [](lo_arg** argv, int) -> void
       {
         switch_patch(&argv[0]->s);
         logger << "Loads from : " << &argv[0]->s << std::endl;
       });
-    nsm_session->add_method("/patcher/clear", "",
+    nsm_session->add_method("/patcher/clear", "", "",
       [](lo_arg** argv, int) -> void
       {
         details::clear_patch();

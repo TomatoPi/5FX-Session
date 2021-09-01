@@ -12,5 +12,6 @@ link_libraries(sfx)
 link_libraries(lo)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
+# add_executable(5FX-Server nsm-server.py)
 
 install(TARGETS ${PROJECT_NAME})

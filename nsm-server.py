@@ -32,7 +32,7 @@ class NSMCommand :
 
       msg.add((t, val))
 
-    context.server.send(context.address, msg)
+    context.nsm_server.server.send(context.address, msg)
     if self.quit :
       context.currentSession = ""
 
@@ -44,6 +44,21 @@ class Command :
   def call(self, cmd, context, **kwargs) :
     self.routine(context)
 
+class Server :
+  def __init__(self, port) -> None:
+
+    success = False
+    for t in range(5) :
+      try :
+        self.port = port + random.randint(1, 10000)
+        self.url = 'osc.udp://localhost:' + str(self.port)
+        self.server = liblo.ServerThread(self.port, liblo.UDP)
+        success = True
+      except liblo.ServerError :
+        pass
+    if not success :
+      exit(-1)
+
 class Context :
   def __init__(self, root, port, commands) :
 
@@ -53,27 +68,29 @@ class Context :
     if not os.path.exists(self.sessionRoot) :
       os.makedirs(self.sessionRoot)
 
-    self.commands = commands
-    self.isRunning = True
-    self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)])
+    self.nsm_server = Server(port+1)
+    self.sfx_server = Server(port+2)
+
     self.url = 'osc.udp://localhost:' + str(port)
     self.address = liblo.Address(self.url)
 
     os.environ['NSM_URL'] = self.url
+    os.environ['SFX_URL'] = self.sfx_server.url
 
-    success = False
-    for t in range(5) :
-      try :
-        self.server = liblo.ServerThread(port + random.randint(1, 10000), liblo.UDP)
-        success = True
-      except liblo.ServerError :
-        pass
-    if not success :
-      exit(-1)
-          
+    self.commands = commands
+    self.isRunning = True
+    self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)], env=os.environ)
 
-    self.server.add_method('/reply', None, nsm_reply_callback, self)
-    self.server.start()
+    self.nsm_server.server.add_method('/reply', None, nsm_reply_callback, self)
+    self.nsm_server.server.start()
+
+    self.sfx_server.server.add_method('/sfx/new/client', None, sfx_new_client_callback, self)
+    self.sfx_server.server.add_method('/sfx/new/method', None, sfx_new_method_callback, self)
+    self.sfx_server.server.start()
+    
+
+    print('NSM_URL =', os.environ['NSM_URL'])
+    print('SFX_URL =', os.environ['SFX_URL'])
 
   def call(self, cmd, **kwargs) :
     self.commands[cmd].call(cmd, self, **kwargs)
@@ -92,7 +109,26 @@ def nsm_reply_callback(path, args, types, address, context) :
   if 0 == len(messagepath) :
     return
   
-  print(replypath, messagepath)
+  print("5FX-Server Recieved : ", replypath, messagepath)
+
+
+
+def sfx_new_client_callback(path, args, types, address, context) :
+  client_id = args[0]
+  client_port = args[1]
+  
+  print("5FX-Server New Client : ", client_id, client_port)
+
+
+def sfx_new_method_callback(path, args, types, address, context) :
+
+  client_id = args[0]
+  method = args[1]
+  params = args[2]
+  description = args[3]
+  
+  print("5FX-Server New Method : ", client_id, method, params, description)
+
 
 def cmd_help(context) :
   commands = context.commands

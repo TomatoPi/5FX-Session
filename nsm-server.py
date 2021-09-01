@@ -81,9 +81,6 @@ class Context :
     self.isRunning = True
     self.daemon = sp.Popen(["nsmd", "--session-root", self.sessionRoot, "--osc-port", str(port)], env=os.environ)
 
-    self.nsm_server.server.add_method('/reply', None, nsm_reply_callback, self)
-    self.nsm_server.server.start()
-
     self.sfx_server.server.add_method('/sfx/new/client', None, sfx_new_client_callback, self)
     self.sfx_server.server.add_method('/sfx/new/method', None, sfx_new_method_callback, self)
     self.sfx_server.server.start()
@@ -100,17 +97,6 @@ class Context :
     self.call('abort')
     time.sleep(5)
     self.call('open', project = tmp)
-
-
-def nsm_reply_callback(path, args, types, address, context) :
-  replypath = args[0]
-  messagepath = args[1]
-
-  if 0 == len(messagepath) :
-    return
-  
-  print("5FX-Server Recieved : ", replypath, messagepath)
-
 
 
 def sfx_new_client_callback(path, args, types, address, context) :

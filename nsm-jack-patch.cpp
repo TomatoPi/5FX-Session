@@ -1,4 +1,6 @@
-#include <5FX/jackwrap.hpp>
+#include <5FX/sfx.hpp>
+#include <5FX/nsmwrap.hpp>
+#include <5FX/logger.hpp>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -20,107 +22,81 @@
 
 #include <signal.h>
 
+constexpr const char* EmptyPatch = "{'ports': [], 'graph': []}";
+
+MAKE_DEFAULTED(CurrentPatch, std::string, "default.pb");
+
+sfx::Logger logger;
+
+struct Config : public sfx::Config<CurrentPatch>
+{
+  sfx::nsm::Config* session = nullptr;
+
+  std::filesystem::path session_path() const
+  {
+    return session->get<sfx::nsm::InstancePath>().value();
+  }
+  std::filesystem::path patchbays_path() const
+  {
+    return session_path() / "patchbays";
+  }
+  std::filesystem::path patch_path() const
+  {
+    return patchbays_path() / get<CurrentPatch>().value();
+  }
+  std::filesystem::path config_path() const
+  {
+    return session_path() / "config.cfg";
+  }
+
+  void save() const
+  {
+    sfx::FileGuard config_file{ config_path(), *this };
+    sfx::sofstream stream{ config_file };
+    stream.stream() << *this;
+    logger << "Save Global Config" << std::endl;
+  }
+};
+
 std::atomic_flag run;
 
-std::unique_ptr<lo::ServerThread> osc_server;
-std::unique_ptr<lo::Address> nsm_server;
-std::string nsm_url;
-std::atomic_flag nsm_client_opened;
+std::shared_ptr<sfx::nsm::Session> nsm_session;
+sfx::nsm::Config default_config;
 bool has_nsm;
 
-struct Config
-{
-  std::unordered_set<std::string> patchbays;
-  std::string current_patch;
-} config;
+Config global_config;
 
-struct Session
+namespace details
 {
-  std::string instance_path;
-  std::string display_name;
-  std::string client_id;
-} session;
-
-struct FileOpenFailure { std::string path; };
-struct DirectoryCreationFailure { std::string path; };
-struct SoundFontLoadingFailure { std::string path; };
-
-struct HomeNotFound {};
-struct OSCServerOpenFailure {};
-
-std::optional<std::string> get_env(const std::string& var, char const* env[])
-{
-  std::regex regex(var + "=(.*)");
-  std::cmatch match;
-  for (int i = 0; env && env[i]; ++i) {
-    if (std::regex_match(env[i], match, regex)) {
-      return std::make_optional(match[1]);
-    }
-  }
-  return std::nullopt;
-}
-
-void clear_patch()
-{
-  system(std::string("jack-patch.py --clear").c_str());
-}
-void save_patch(const std::string& path)
-{
-  system((std::string("jack-patch.py --save > ") + path).c_str());
-}
-void load_patch(const std::string& path)
-{
-  if (!std::filesystem::exists(path))
+  void clear_patch()
   {
-    clear_patch();
-    save_patch(path);
+    system(std::string("jack-patch.py --clear").c_str());
   }
-  system((std::string("jack-patch.py --load < ") + path).c_str());
-}
-
-Config default_config(const std::string& home)
-{
-  Config config;
-  config.current_patch = home + "/patchbays/default.pbay";
-  config.patchbays = { config.current_patch };
-  return config;
-}
-Config load_config_file(const std::string& rootpath)
-{
-  Config config;
-  const std::filesystem::path root = rootpath;
+  void save_patch(const std::string& path)
   {
-    const std::filesystem::path path(root / "patchbays");
-    for(auto const& dir_entry: std::filesystem::directory_iterator{path})
-      config.patchbays.emplace(dir_entry.path());
-  }{
-    const std::filesystem::path path(root / "config.cfg");
-    std::ifstream file(path);
-    if (file.fail()) {
-      throw FileOpenFailure{ path };
-    }
-    file >> config.current_patch;
-    file.close();
+    sfx::FileGuard(path, EmptyPatch);
+    system((std::string("jack-patch.py --save > ") + path).c_str());
   }
-  return config;
+  void load_patch(const std::string& path)
+  {
+    sfx::FileGuard(path, EmptyPatch, std::make_optional([](const auto& path){
+      clear_patch();
+      save_patch(path);
+    }));
+    system((std::string("jack-patch.py --load < ") + path).c_str());
+  }
 }
-void save_config(const Config& config, const std::string& rootpath)
-{
-  const std::filesystem::path root(rootpath);
 
-  if (!std::filesystem::exists(root / "patchbays")) {
-    if (!std::filesystem::create_directories(root / "patchbays")) {
-      throw DirectoryCreationFailure{ root / "patchbays "};
-    }
-  }
-  std::string path(root / "config.cfg");
-  std::ofstream file(path);
-  if (file.fail()) {
-    throw FileOpenFailure{ path };
-  }
-  file << config.current_patch;
-  file.close();
+void switch_patch(const std::string& path)
+{
+  const auto oldpatch = global_config.patch_path();
+  const auto newpatch = global_config.patchbays_path() / path;
+  details::save_patch(oldpatch);
+  details::clear_patch();
+  details::save_patch(newpatch);
+  global_config.get<CurrentPatch>().set(newpatch);
 }
+
 
 void sigkill(int)
 {
@@ -132,127 +108,63 @@ int main(int argc, char const* argv[], char const* env[])
 
   std::srand(std::time(nullptr));
 
-  auto home = get_env("HOME", env);
-  if (!home.has_value()) {
-    throw HomeNotFound{};
+  auto nsm_status = sfx::nsm::try_connect_to_server(argv[0], "5FX-Patcher", [](const sfx::nsm::Session& session){
+    sfx::FileGuard patch_file{ global_config.patch_path(), global_config };
+    details::save_patch(patch_file);
+    global_config.save();
+    return true;
+  });
+
+  if (0 == nsm_status.index())
+  {
+    default_config = std::get<sfx::nsm::Config>(nsm_status);
+    global_config.session = &default_config;
+    logger << "NSM not found... standalone mode :\n" << default_config << std::endl;
+    has_nsm = false;
+    global_config.save();
   }
+  else if (1 ==  nsm_status.index())
+  {
+    nsm_session = std::get<std::shared_ptr<sfx::nsm::Session>>(nsm_status);
+    global_config.session = &nsm_session->config;
+    logger.open(global_config.session_path() / "lastest.log");
 
-  auto nsm = get_env("NSM_URL", env);
-  has_nsm = nsm.has_value();
-  if (nsm.has_value()) {
-
-    /* Create connection to NSM server */
-
-    nsm_url = nsm.value();
-    nsm_server = std::make_unique<lo::Address>(nsm_url);
-    std::cout << "Start under NSM session at : " << nsm_url << std::endl;
-    bool success(false);
-    for (int i = 0; i < 5; ++i) {
-      osc_server = std::make_unique<lo::ServerThread>(8000 + (std::rand() % 1000));
-      if (osc_server->is_valid()) {
-        success = true;
-        break;
-      }
-    }
-    if (!success) {
-      throw OSCServerOpenFailure{};
-    }
-
-    osc_server->add_method("/nsm/client/open", "sss",
-      [](lo_arg** argv, int) -> void
-      {
-        session.instance_path = &argv[0]->s;
-        session.display_name = &argv[1]->s;
-        session.client_id = &argv[2]->s;
-        nsm_client_opened.clear();
-      });
-    osc_server->add_method("/nsm/client/save", "",
-      [](lo_arg** argv, int) -> void
-      {
-        const std::filesystem::path path = session.instance_path;
-        const std::filesystem::path patch = path / "patchbays" / config.current_patch;
-        save_patch(patch);
-        save_config(config, path);
-        nsm_server->send("/reply", "ss", "/nsm/client/save", "OK");
-      });
+    logger << "NSM found : " << nsm_session->nsm_server->hostname() << ":" << nsm_session->nsm_server->port() << std::endl;
+    logger << "Config : " << nsm_session->config << std::endl;
+    has_nsm = true;
     
-    osc_server->add_method("/patcher/new", "s",
+    nsm_session->add_method("/patcher/new", "s",
       [](lo_arg** argv, int) -> void
       {
-        const std::filesystem::path path = session.instance_path;
-        const std::filesystem::path oldpatch = path / "patchbays" / config.current_patch;
-        const std::filesystem::path newpatch = path / "patchbays" / &argv[0]->s;
-        save_patch(oldpatch);
-        clear_patch();
-        save_patch(newpatch);
-        config.current_patch = &argv[0]->s;
-        config.patchbays.emplace(config.current_patch);
+        switch_patch(&argv[0]->s);
+        logger << "New : " << &argv[0]->s << std::endl;
       });
-    osc_server->add_method("/nsm/client/save", "",
+    nsm_session->add_method("/patcher/save", "",
       [](lo_arg** argv, int) -> void
       {
-        const std::filesystem::path path = session.instance_path;
-        const std::filesystem::path patch = path / "patchbays" / config.current_patch;
-        save_patch(patch);
+        details::save_patch(global_config.patch_path());
+        logger << "Save to : " << global_config.patch_path() << std::endl;
       });
-    osc_server->add_method("/nsm/client/load", "s",
+    nsm_session->add_method("/patcher/load", "s",
       [](lo_arg** argv, int) -> void
       {
-        const std::filesystem::path path = session.instance_path;
-        const std::filesystem::path oldpatch = path / "patchbays" / config.current_patch;
-        const std::filesystem::path newpatch = path / "patchbays" / &argv[0]->s;
-        save_patch(oldpatch);
-        clear_patch();
-        save_patch(newpatch);
-        config.current_patch = &argv[0]->s;
-        config.patchbays.emplace(config.current_patch);
+        switch_patch(&argv[0]->s);
+        logger << "Loads from : " << &argv[0]->s << std::endl;
       });
-    osc_server->add_method("/nsm/client/clear", "",
+    nsm_session->add_method("/patcher/clear", "",
       [](lo_arg** argv, int) -> void
       {
-        clear_patch();
+        details::clear_patch();
+        logger << "Clear" << std::endl;
       });
-    
-    
-    osc_server->start();
-
-    /* Announce client and wait for response */
-    nsm_client_opened.test_and_set();
-    nsm_server->send(
-      "/nsm/server/announce", "sssiii",
-      "5FX-Patcher", "::", argv[0], 1, 1, getpid());
-    while (nsm_client_opened.test_and_set()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    const std::filesystem::path path = session.instance_path;
-
-    if (std::filesystem::exists(path)) {
-      config = load_config_file(path);
-    } else {
-      config = default_config(path);
-      save_config(config, path);
-    }
-    const std::filesystem::path patch = path / "patchbays" / config.current_patch;
-    clear_patch();
-    load_patch(patch);
-
-  } else {
-    std::cout << "Start in Standalone mode" << std::endl;
-
-    session.instance_path = home.value() + "/.5FX/5FX-Patcher/";
-    session.client_id = "5FX-Patcher";
-    session.display_name = "5FX-Patcher";
-
-    config = default_config(home.value());
   }
 
   /* load session and everything else */
 
   if (has_nsm) {
-    nsm_server->send("/reply", "ss", "/nsm/client/open", "OK");
+    nsm_session->nsm_server->send("/reply", "ss", "/nsm/client/open", "OK");
   } else {
-    std::cout << "Ready" << std::endl;
+    logger << "Ready" << std::endl;
   }
 
   signal(SIGTERM, sigkill);
@@ -267,24 +179,10 @@ int main(int argc, char const* argv[], char const* env[])
       }
     } else {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      if (!nsm_client_opened.test_and_set())
-      {
-        const std::filesystem::path path = session.instance_path;
-
-        if (std::filesystem::exists(path)) {
-          config = load_config_file(path);
-        } else {
-          config = default_config(path);
-          save_config(config, path);
-        }
-        const std::filesystem::path patch = path / "patchbays" / config.current_patch;
-        clear_patch();
-        load_patch(patch);
-      }
     }
   } while (run.test_and_set());
 
-  osc_server->stop();
+  nsm_session->osc_server->stop();
 
   return 0;
 }
